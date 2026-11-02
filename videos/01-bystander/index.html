@@ -1,0 +1,519 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Bystander</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body>
+<script type="module">
+import * as THREE from './node_modules/three/build/three.module.js';
+
+const W = 1080, H = 1920, DUR = 14.52;
+const CREAM = '#efe6d2', INK = '#0d0c0b', RED = '#d8352a', BLUE = [61, 127, 214], BG = '#1b1815';
+const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+const c = cv.getContext('2d');
+const dk = document.createElement('canvas'); dk.width = W; dk.height = H;
+const d = dk.getContext('2d');
+
+// ---------- utils ----------
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, k) => a + (b - a) * k;
+const eio = k => k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+const eout = k => 1 - Math.pow(1 - k, 3);
+const ein = k => k * k;
+const back = k => { const s = 1.9; k = k - 1; return k * k * ((s + 1) * k + s) + 1; };
+const shirtCol = b => b <= 0 ? INK : `rgb(${Math.round(lerp(13, BLUE[0], b))},${Math.round(lerp(12, BLUE[1], b))},${Math.round(lerp(11, BLUE[2], b))})`;
+function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function hash(i) { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+
+// ---------- person (paper cut silhouette, two pass) ----------
+const POSE = {
+  idle: { aL: [-.12, -.05], aR: [.12, .05], lL: [-.07, -.07], lR: [.07, .07] },
+  phone: { aL: [-.1, -.04], aR: [.45, 2.75], lL: [-.07, -.07], lR: [.07, .07], phone: true },
+  cross: { aL: [.35, 1.55], aR: [-.35, -1.55], lL: [-.09, -.09], lR: [.09, .09] },
+  shrug: { aL: [-.9, -.2], aR: [.9, .2], lL: [-.07, -.07], lR: [.07, .07] },
+  kneel: { aL: [-1.0, -1.35], aR: [-.75, -1.15], lL: [-1.35, 0], lR: [.2, 1.55] },
+};
+function mixPose(p, q, k) {
+  const o = {};
+  for (const key of ['aL', 'aR', 'lL', 'lR']) o[key] = [lerp(p[key][0], q[key][0], k), lerp(p[key][1], q[key][1], k)];
+  o.phone = k < .5 ? p.phone : q.phone;
+  return o;
+}
+function limb(x, y, a1, a2, len) {
+  const x1 = x + Math.sin(a1) * len, y1 = y + Math.cos(a1) * len;
+  const x2 = x1 + Math.sin(a2) * len, y2 = y1 + Math.cos(a2) * len;
+  c.beginPath(); c.moveTo(x, y); c.lineTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+  return [x2, y2];
+}
+function person(o) {
+  const p = o.pose;
+  const out = {};
+  c.save();
+  c.globalAlpha = o.alpha ?? 1;
+  c.translate(o.x, o.y); c.rotate(o.rot || 0); c.scale(o.s, o.s);
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  let hand;
+  for (const pass of [0, 1]) {
+    const ex = pass ? 0 : 9;
+    const col = pass ? INK : CREAM;
+    c.strokeStyle = col; c.fillStyle = col;
+    c.lineWidth = 27 + ex * 2;
+    limb(-15, -140, p.lL[0], p.lL[1], 72);
+    limb(15, -140, p.lR[0], p.lR[1], 72);
+    if (pass) c.fillStyle = o.shirt || INK;
+    rr(c, -42 - ex, -268 - ex, 84 + ex * 2, 140 + ex * 2, 32 + ex); c.fill();
+    c.fillStyle = col;
+    c.lineWidth = 22 + ex * 2;
+    limb(-36, -248, p.aL[0], p.aL[1], 62);
+    hand = limb(36, -248, p.aR[0], p.aR[1], 62);
+    c.beginPath(); c.arc(0, -306, 37 + ex, 0, Math.PI * 2); c.fill();
+  }
+  if (p.phone) {
+    c.save(); c.translate(hand[0], hand[1] - 14); c.rotate(.15);
+    c.fillStyle = '#f7efdc'; c.shadowColor = '#f7efdc'; c.shadowBlur = 18;
+    rr(c, -11, -18, 22, 36, 4); c.fill(); c.restore();
+  }
+  if (o.eye) { c.fillStyle = CREAM; c.beginPath(); c.arc(o.eye * 17, -312, 5.5, 0, Math.PI * 2); c.fill(); }
+  const m = c.getTransform();
+  const hp = m.transformPoint(new DOMPoint(hand[0], hand[1]));
+  const hd = m.transformPoint(new DOMPoint(0, -306));
+  out.hand = [hp.x, hp.y]; out.head = [hd.x, hd.y];
+  c.restore();
+  return out;
+}
+// local arm angle that points along world direction (dx,dy) for a body rotated by rot
+function armTo(dx, dy, rot) {
+  const cs = Math.cos(-rot), sn = Math.sin(-rot);
+  const lx = dx * cs - dy * sn, ly = dx * sn + dy * cs;
+  return Math.atan2(lx, ly);
+}
+
+// ---------- station ----------
+const BASE = [
+  { x: 70, y: 1175, s: .78, pose: 'phone', eye: 1 },
+  { x: 190, y: 1196, s: .86, pose: 'idle', eye: 1 },
+  { x: 305, y: 1168, s: .74, pose: 'phone', eye: -1 },
+  { x: 425, y: 1190, s: .84, pose: 'cross', eye: 1 },
+  { x: 545, y: 1174, s: .78, pose: 'idle', eye: -1 },
+  { x: 665, y: 1196, s: .86, pose: 'phone', eye: 1 },
+  { x: 820, y: 1186, s: .85, pose: 'idle', eye: -1, helper: true },
+  { x: 935, y: 1170, s: .75, pose: 'phone', eye: -1 },
+  { x: 1035, y: 1196, s: .86, pose: 'cross', eye: -1 },
+];
+const EXTRA = [130, 250, 365, 485, 605, 725, 875, 985, 15, 1075].map((x, i) => ({
+  x, y: 1138 + (i % 3) * 9, s: .63 + (i % 3) * .03, pose: ['phone', 'idle', 'cross'][i % 3], eye: i % 2 ? 1 : -1, i,
+}));
+const HELP_END = { x: 455, y: 1300, s: .98 };
+const HERO = { x: 650, y: 1302, s: 1.0 };
+
+function zoomPt(x, y, z) { return [540 + (x - 540) * z, 1250 + (y - 1250) * z]; }
+
+function stationBG(t) {
+  // ceiling lamps
+  for (let i = 0; i < 4; i++) {
+    const x = 135 + i * 270;
+    c.strokeStyle = '#2b2722'; c.lineWidth = 4; c.beginPath(); c.moveTo(x, -400); c.lineTo(x, 180); c.stroke();
+    c.fillStyle = '#2b2722'; rr(c, x - 70, 180, 140, 26, 8); c.fill();
+    const g = c.createRadialGradient(x, 210, 0, x, 210, 260);
+    g.addColorStop(0, 'rgba(239,230,210,.16)'); g.addColorStop(1, 'rgba(239,230,210,0)');
+    c.fillStyle = g; c.fillRect(x - 260, 200, 520, 300);
+    c.fillStyle = '#d9cdb3'; rr(c, x - 60, 204, 120, 8, 4); c.fill();
+  }
+  // train
+  c.fillStyle = '#25211d'; rr(c, -200, 640, 1480, 500, 36); c.fill();
+  c.fillStyle = '#1e1b18'; c.fillRect(-200, 1040, 1480, 100);
+  for (let i = 0; i < 6; i++) {
+    const x = -110 + i * 230;
+    c.fillStyle = '#332e28'; rr(c, x, 700, 170, 170, 14); c.fill();
+    c.fillStyle = 'rgba(239,230,210,.05)'; rr(c, x + 10, 710, 60, 150, 10); c.fill();
+  }
+  c.strokeStyle = RED; c.lineWidth = 10; c.beginPath(); c.moveTo(-200, 930); c.lineTo(1280, 930); c.stroke();
+  // platform
+  c.fillStyle = '#141210'; c.fillRect(-400, 1132, 1880, 1400);
+  c.strokeStyle = CREAM; c.lineWidth = 5; c.beginPath(); c.moveTo(-400, 1134); c.lineTo(1480, 1134); c.stroke();
+  c.setLineDash([46, 30]); c.strokeStyle = 'rgba(239,230,210,.35)'; c.lineWidth = 8;
+  c.beginPath(); c.moveTo(-400, 1160); c.lineTo(1480, 1160); c.stroke(); c.setLineDash([]);
+  // floor shine
+  const g = c.createLinearGradient(0, 1134, 0, 1700); g.addColorStop(0, 'rgba(239,230,210,.05)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = g; c.fillRect(-400, 1134, 1880, 600);
+}
+
+function stationState(t) {
+  const s = { z: 1.2, extra: 0, heroRot: -1.45, heroArm: null, helpK: 0, kneelK: 0, blue: 0, runPh: 0,
+    dark: 0, spotX: 820, spotA: 0, check: 0, bubble: 0, ring: -1, xMark: 0, line: 0, shrug: 0, extraPop: [] };
+  // S1 fall
+  if (t < 2.0) {
+    s.heroRot = -.35 - 1.1 * ein(seg(t, 0, .78));
+  }
+  // S2 zoom out + crowd fills
+  if (t >= 2.0 && t < 3.95) {
+    s.z = lerp(1.2, .84, eio(seg(t, 2.0, 3.6)));
+    s.extraPop = EXTRA.map((e, i) => back(seg(t, 2.35 + i * .11, 2.6 + i * .11)));
+  }
+  if (t >= 8.4) {
+    s.z = .86;
+    s.extraPop = EXTRA.map(() => 1);
+  }
+  // S5 shout
+  if (t >= 8.4 && t < 10.55) {
+    const up = eout(seg(t, 8.55, 8.85));
+    s.heroArm = { dx: 0, dy: -1, k: up };
+    s.bubble = back(seg(t, 8.62, 8.9));
+    s.ring = t;
+    s.xMark = back(seg(t, 9.95, 10.15));
+  }
+  // S6 point + spotlight
+  if (t >= 10.55) {
+    s.dark = .62 * eout(seg(t, 10.55, 10.8));
+    s.spotA = eout(seg(t, 10.55, 10.75));
+    const sw = eio(seg(t, 10.6, 11.3));
+    s.spotX = sw < .55 ? lerp(120, 980, sw / .55) : lerp(980, 820, (sw - .55) / .45);
+    s.heroArm = { dx: .85, dy: -.53, k: eout(seg(t, 10.62, 10.85)) };
+    s.line = eout(seg(t, 10.75, 11.25));
+  }
+  // S7 helper turns blue, runs, kneels
+  if (t >= 11.65) {
+    s.blue = eout(seg(t, 12.05, 12.35));
+    s.helpK = eio(seg(t, 12.35, 12.9));
+    s.kneelK = eio(seg(t, 12.85, 13.1));
+    s.runPh = t * 19;
+    s.line = 1 - seg(t, 12.2, 12.4);
+    s.heroArm = { dx: .85, dy: -.53, k: 1 - eout(seg(t, 12.3, 12.7)) };
+    s.check = back(seg(t, 12.98, 13.2));
+    s.dark = lerp(.62, .4, seg(t, 12.6, 13.1));
+  }
+  // S8 rewind back to frame 0
+  if (t >= 13.3) {
+    const r = eio(seg(t, 13.32, 14.42));
+    const rb = 1 - r;
+    s.z = lerp(.86, 1.2, r);
+    s.extraPop = EXTRA.map((e, i) => clamp(rb * 1.4 - (EXTRA.length - 1 - i) * .04));
+    s.helpK = rb; s.kneelK = clamp(rb * 1.6 - .6);
+    s.blue = rb; s.runPh = -t * 22;
+    s.heroRot = lerp(-1.45, -.35, r);
+    s.heroArm = null;
+    s.check = clamp(1 - r * 3);
+    s.dark = .4 * rb; s.spotA = rb; s.spotX = lerp(HELP_END.x, 820, r);
+  }
+  return s;
+}
+
+let headPts = [];
+function station(t) {
+  const st = stationState(t);
+  c.save();
+  c.translate(540, 1250); c.scale(st.z, st.z); c.translate(-540, -1250);
+  stationBG(t);
+  // crowd
+  const list = [];
+  EXTRA.forEach((e, i) => { const k = st.extraPop[i] || 0; if (k > .01) list.push({ ...e, s: e.s * Math.max(k, .01), alpha: clamp(k * 2) , extra: true}); });
+  BASE.forEach((b, i) => { if (!(b.helper && st.helpK > 0)) list.push({ ...b, i }); });
+  list.sort((a, b) => a.y - b.y);
+  headPts = [];
+  for (const p of list) {
+    const breathe = Math.sin(t * 2 + (p.i || 0) * 1.7) * .012;
+    let pose = POSE[p.pose];
+    let shirt = INK;
+    if (p.helper) shirt = shirtCol(st.blue);
+    const out = person({ x: p.x, y: p.y, s: p.s, rot: breathe, pose, shirt, eye: p.eye, alpha: p.alpha });
+    headPts.push({ p, out });
+  }
+  // shrug reaction + question marks on ring pass (S5)
+  // hero
+  let heroPose = POSE.idle;
+  if (st.heroArm && st.heroArm.k > 0) {
+    const a = armTo(st.heroArm.dx, st.heroArm.dy, st.heroRot);
+    heroPose = { ...POSE.idle, aR: [lerp(.12, a, st.heroArm.k), lerp(.05, a, st.heroArm.k)] };
+  }
+  const hero = person({ x: HERO.x, y: HERO.y, s: HERO.s, rot: st.heroRot, pose: heroPose, eye: -1 });
+  // helper moving
+  let helper = null;
+  if (st.helpK > 0) {
+    const b = BASE.find(q => q.helper);
+    const k = st.helpK;
+    const x = lerp(b.x, HELP_END.x, k), s = lerp(b.s, HELP_END.s, k);
+    const y = lerp(b.y, HELP_END.y, k) + 52 * s * st.kneelK;
+    const sw = Math.sin(st.runPh) * (1 - st.kneelK) * (k > 0 && k < 1 ? 1 : .0);
+    const run = { aL: [-.7 * sw, -.7 * sw - .5], aR: [.7 * sw, .7 * sw - .5], lL: [.6 * sw, .6 * sw - .3], lR: [-.6 * sw, -.6 * sw - .3] };
+    const pose = mixPose(run, POSE.kneel, st.kneelK);
+    helper = person({ x, y, s, rot: lerp(0, -.12, (k > 0 && k < 1) ? 1 : 0) + st.kneelK * -.05, pose, shirt: shirtCol(st.blue), eye: -1 });
+    helper.x = x; helper.y = y;
+  }
+  c.restore();
+
+  // darkness with spotlight (screen space)
+  if (st.dark > .001) {
+    d.setTransform(1, 0, 0, 1, 0, 0); d.clearRect(0, 0, W, H);
+    d.fillStyle = `rgba(8,7,6,${st.dark})`; d.fillRect(0, 0, W, H);
+    if (st.spotA > 0) {
+      const tx = helper ? lerp(st.spotX, helper.x, st.helpK) : st.spotX;
+      const [sx, sy] = zoomPt(tx, helper ? helper.y : 1186, st.z);
+      d.globalCompositeOperation = 'destination-out';
+      d.globalAlpha = st.spotA;
+      d.beginPath(); d.moveTo(sx - 40, -40); d.lineTo(sx + 40, -40); d.lineTo(sx + 150, sy + 20); d.lineTo(sx - 150, sy + 20); d.closePath(); d.fill();
+      d.beginPath(); d.ellipse(sx, sy + 10, 155, 40, 0, 0, Math.PI * 2); d.fill();
+      d.globalCompositeOperation = 'source-over'; d.globalAlpha = 1;
+      c.drawImage(dk, 0, 0);
+      c.save(); c.globalAlpha = .07 * st.spotA; c.fillStyle = CREAM;
+      c.beginPath(); c.moveTo(sx - 40, -40); c.lineTo(sx + 40, -40); c.lineTo(sx + 150, sy + 20); c.lineTo(sx - 150, sy + 20); c.closePath(); c.fill();
+      c.restore();
+    } else c.drawImage(dk, 0, 0);
+  }
+
+  // S5: shout bubble, rings, question marks, X
+  if (st.bubble > 0) {
+    const [hx, hy] = hero.hand;
+    const bx = hx + 40, by = hy - 150;
+    // rings
+    for (let r = 0; r < 2; r++) {
+      const rt = seg(st.ring, 8.85 + r * .45, 9.75 + r * .45);
+      if (rt > 0 && rt < 1) {
+        c.save(); c.strokeStyle = RED; c.globalAlpha = 1 - rt; c.lineWidth = 10 * (1 - rt) + 2;
+        c.beginPath(); c.arc(bx, by, rt * 900, 0, Math.PI * 2); c.stroke(); c.restore();
+      }
+    }
+    const reach = seg(st.ring, 8.85, 9.75) * 900;
+    for (const { p, out } of headPts) {
+      const dd = Math.hypot(out.head[0] - bx, out.head[1] - by);
+      if (reach > dd && !p.extra) {
+        const k = back(clamp((reach - dd) / 160));
+        c.save(); c.translate(out.head[0], out.head[1] - 70 * p.s); c.scale(k, k);
+        c.font = '900 54px Inter'; c.textAlign = 'center'; c.textBaseline = 'middle';
+        c.lineWidth = 10; c.strokeStyle = INK; c.strokeText('?', 0, 0); c.fillStyle = CREAM; c.fillText('?', 0, 0);
+        c.restore();
+      }
+    }
+    c.save(); c.translate(bx, by); c.scale(st.bubble, st.bubble);
+    c.fillStyle = CREAM; c.strokeStyle = INK; c.lineWidth = 6;
+    rr(c, -150, -62, 300, 124, 30); c.fill(); c.stroke();
+    c.beginPath(); c.moveTo(-60, 58); c.lineTo(-95, 110); c.lineTo(-10, 60); c.closePath(); c.fill();
+    c.font = '900 64px Inter'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = INK; c.fillText('TOLONG!', 0, 4);
+    c.restore();
+    if (st.xMark > 0) {
+      c.save(); c.translate(bx, by); c.scale(st.xMark * 1.0, st.xMark * 1.0); c.rotate(-.06);
+      c.strokeStyle = RED; c.lineCap = 'round'; c.lineWidth = 30;
+      c.beginPath(); c.moveTo(-130, -110); c.lineTo(130, 110); c.moveTo(130, -110); c.lineTo(-130, 110); c.stroke();
+      c.restore();
+    }
+  }
+  // S6 dotted red line hero hand -> chosen person
+  if (st.line > 0 && st.heroArm) {
+    const [hx, hy] = hero.hand;
+    const b = BASE.find(q => q.helper);
+    const [tx, ty] = zoomPt(b.x, b.y - 200 * b.s, st.z);
+    const ex = lerp(hx, tx, st.line), ey = lerp(hy, ty, st.line);
+    c.save(); c.strokeStyle = RED; c.lineWidth = 9; c.setLineDash([4, 22]); c.lineCap = 'round';
+    c.beginPath(); c.moveTo(hx, hy); c.lineTo(ex, ey); c.stroke(); c.restore();
+    if (st.line > .98) {
+      c.save(); c.strokeStyle = RED; c.lineWidth = 7; c.beginPath(); c.arc(tx, ty - 40, 95 + Math.sin(t * 12) * 4, 0, Math.PI * 2); c.stroke(); c.restore();
+    }
+  }
+  // S7 check
+  if (st.check > 0 && helper) {
+    const [x, y] = [helper.head[0] + 40, helper.head[1] - 120];
+    c.save(); c.translate(x, y); c.scale(st.check, st.check);
+    c.fillStyle = CREAM; c.beginPath(); c.arc(0, 0, 56, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = RED; c.lineWidth = 14; c.lineCap = 'round'; c.lineJoin = 'round';
+    c.beginPath(); c.moveTo(-24, 2); c.lineTo(-6, 22); c.lineTo(28, -20); c.stroke();
+    c.restore();
+  }
+  return st;
+}
+
+// ---------- S3: passing the buck ----------
+const BUCK = [
+  { x: 135, txt: 'dia aja', dir: 1 },
+  { x: 337, txt: 'nanti ada', dir: 1 },
+  { x: 540, txt: 'bukan aku', dir: 1 },
+  { x: 743, txt: 'dia kali', dir: 1 },
+  { x: 945, txt: 'dia aja', dir: -1 },
+];
+function sceneBuck(t) {
+  const z = lerp(1, 1.05, seg(t, 3.9, 6.55));
+  c.save(); c.translate(540, 1100); c.scale(z, z); c.translate(-540, -1100);
+  c.fillStyle = '#1d1a17'; c.fillRect(-100, -100, 1280, 2120);
+  const g = c.createRadialGradient(540, 900, 50, 540, 900, 900);
+  g.addColorStop(0, 'rgba(239,230,210,.10)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(-100, -100, 1280, 2120);
+  BUCK.forEach((b, i) => {
+    const y = i % 2 ? 1310 : 1285;
+    const out = person({ x: b.x, y, s: 1.08, rot: Math.sin(t * 2 + i) * .01, pose: POSE[i % 2 ? 'cross' : 'idle'], eye: b.dir });
+    const k = back(seg(t, 4.25 + i * .3, 4.5 + i * .3));
+    if (k <= 0) return;
+    const by = i % 2 ? 720 : 585;
+    c.save(); c.translate(b.x, by); c.scale(k, k);
+    c.fillStyle = CREAM;
+    c.beginPath(); c.arc(0 + b.dir * -20, 105, 14, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.arc(b.dir * -30, 140, 8, 0, Math.PI * 2); c.fill();
+    rr(c, -95, -70, 190, 150, 40); c.fill();
+    c.font = '800 34px Inter'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = INK;
+    c.fillText(b.txt, 0, -28);
+    // arrow
+    c.strokeStyle = RED; c.fillStyle = RED; c.lineWidth = 10; c.lineCap = 'round';
+    const ax = b.dir * 50;
+    c.beginPath(); c.moveTo(-ax, 30); c.lineTo(ax, 30); c.stroke();
+    c.beginPath(); c.moveTo(ax + b.dir * 14, 30); c.lineTo(ax - b.dir * 14, 14); c.lineTo(ax - b.dir * 14, 46); c.closePath(); c.fill();
+    c.restore();
+  });
+  c.restore();
+}
+
+// ---------- S4: title wall ----------
+function sceneTitle(t) {
+  c.fillStyle = '#181513'; c.fillRect(0, 0, W, H);
+  const g = c.createRadialGradient(540, 560, 40, 540, 560, 700);
+  g.addColorStop(0, 'rgba(216,53,42,.16)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  c.fillStyle = '#121010'; c.fillRect(0, 1480, W, 500);
+  c.strokeStyle = CREAM; c.lineWidth = 4; c.beginPath(); c.moveTo(0, 1482); c.lineTo(W, 1482); c.stroke();
+  const rise = eout(seg(t, 6.55, 6.95));
+  for (let i = 0; i < 11; i++) {
+    const x = -40 + i * 116;
+    person({ x, y: 1500 + (1 - rise) * 120 + (i % 2) * 8, s: 1.2, rot: 0, pose: POSE[i % 3 === 1 ? 'cross' : 'idle'], eye: i < 5 ? 1 : -1 });
+  }
+  person({ x: 760, y: 1600, s: 1.2, rot: -1.45, pose: POSE.idle, eye: -1 });
+  const k = back(seg(t, 7.15, 7.4));
+  c.save(); c.translate(540, 560); c.scale(lerp(1.5, 1, eout(seg(t, 7.15, 7.4))), lerp(1.5, 1, eout(seg(t, 7.15, 7.4))));
+  c.globalAlpha = clamp(k * 3);
+  c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+  c.font = '900 132px Inter'; c.lineWidth = 16; c.strokeStyle = INK;
+  c.strokeText('BYSTANDER', 0, -40); c.fillStyle = CREAM; c.fillText('BYSTANDER', 0, -40);
+  c.font = '900 132px Inter';
+  c.strokeText('EFFECT', 0, 100); c.fillStyle = RED; c.fillText('EFFECT', 0, 100);
+  c.restore();
+  const u = eout(seg(t, 7.95, 8.25));
+  c.fillStyle = RED; c.fillRect(540 - 250 * u, 690, 500 * u, 12);
+  c.globalAlpha = seg(t, 8.0, 8.2);
+  c.font = '600 46px Inter'; c.textAlign = 'center'; c.fillStyle = CREAM; c.fillText('efek penonton', 540, 775);
+  c.globalAlpha = 1;
+}
+
+// ---------- overlays ----------
+function hookText(alpha) {
+  if (alpha <= 0) return;
+  c.save(); c.globalAlpha = alpha;
+  c.fillStyle = 'rgba(13,12,11,.82)'; rr(c, 80, 360, 920, 290, 28); c.fill();
+  c.font = '900 76px Inter'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  const lines = [[['Makin ramai,', CREAM]], [['makin ', CREAM], ['kecil', RED], [' peluang', CREAM]], [['kamu ditolong.', CREAM]]];
+  lines.forEach((ln, i) => {
+    const full = ln.map(s => s[0]).join('');
+    const w = c.measureText(full).width;
+    let x = 540 - w / 2;
+    c.textAlign = 'left';
+    for (const [s, col] of ln) { c.fillStyle = col; c.fillText(s, x, 418 + i * 88); x += c.measureText(s).width; }
+  });
+  c.restore();
+}
+function meter(t) {
+  const a = seg(t, 2.0, 2.2) * (1 - seg(t, 3.8, 3.9));
+  if (a <= 0) return;
+  c.save(); c.globalAlpha = a;
+  c.fillStyle = 'rgba(13,12,11,.84)'; rr(c, 90, 340, 900, 330, 28); c.fill();
+  const drop = eio(seg(t, 2.8, 3.5));
+  const pct = Math.round(lerp(85, 31, drop));
+  c.font = '700 40px Inter'; c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillStyle = CREAM;
+  c.fillText(drop < .5 ? 'Sendirian' : 'Bersama 4 orang lain', 140, 400);
+  c.textAlign = 'right'; c.font = '900 72px Inter'; c.fillStyle = RED; c.fillText(pct + '%', 940, 400);
+  c.strokeStyle = CREAM; c.lineWidth = 5; rr(c, 140, 460, 800, 74, 16); c.stroke();
+  c.fillStyle = RED; rr(c, 150, 470, 780 * pct / 100, 54, 10); c.fill();
+  c.textAlign = 'left'; c.font = '600 32px Inter'; c.fillStyle = 'rgba(239,230,210,.85)';
+  c.fillText('menolong orang yang kejang', 140, 585);
+  c.fillStyle = 'rgba(239,230,210,.55)'; c.font = '500 26px Inter'; c.fillText('Darley & Latané (1968)', 140, 630);
+  c.restore();
+}
+
+let WORDS = [];
+const GROUPS = [6, 5, 4, 3, 3, 3, 3, 2, 3, 2, 2];
+function captions(t) {
+  if (t >= 6.55 && t < 8.5) return;
+  let gi = 0, idx = 0, cur = -1;
+  const groups = []; for (const n of GROUPS) { groups.push(WORDS.slice(idx, idx + n)); idx += n; }
+  for (let g = 0; g < groups.length; g++) { if (t >= groups[g][0].start - .05) cur = g; }
+  if (cur < 0) cur = 0;
+  const grp = groups[cur];
+  let actW = null; for (const w of WORDS) if (t >= w.start - .03) actW = w;
+  if (cur === groups.length - 1 && t > 14.45) return;
+  c.save();
+  c.font = '800 62px Inter'; c.textBaseline = 'middle'; c.textAlign = 'left';
+  const sp = c.measureText(' ').width;
+  // wrap into max 2 lines
+  const lines = [[]]; let lw = 0;
+  for (const w of grp) { const ww = c.measureText(w.text).width; if (lw + ww > 900 && lines[lines.length - 1].length) { lines.push([]); lw = 0; } lines[lines.length - 1].push({ w, ww }); lw += ww + sp; }
+  lines.forEach((ln, li) => {
+    const tw = ln.reduce((a, b) => a + b.ww, 0) + sp * (ln.length - 1);
+    let x = 540 - tw / 2; const y = 1468 + (li - (lines.length - 1) / 2) * 76;
+    for (const { w, ww } of ln) {
+      const active = w === actW;
+      c.lineWidth = 14; c.strokeStyle = INK; c.lineJoin = 'round'; c.strokeText(w.text, x, y);
+      c.fillStyle = active ? RED : CREAM; c.fillText(w.text, x, y);
+      x += ww + sp;
+    }
+  });
+  c.restore();
+}
+
+function draw(t) {
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.globalAlpha = 1; c.fillStyle = BG; c.fillRect(0, 0, W, H);
+  if (t < 3.9) station(t);
+  else if (t < 6.55) sceneBuck(t);
+  else if (t < 8.4) sceneTitle(t);
+  else station(t);
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  // hook: full at start, fades in again at the end for the loop
+  const hookA = t < 2.0 ? 1 - seg(t, 1.88, 2.0) : seg(t, 14.28, 14.5);
+  hookText(hookA);
+  meter(t);
+  captions(t);
+}
+
+// ---------- three.js post ----------
+const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(W, H);
+document.body.appendChild(renderer.domElement);
+const tex = new THREE.CanvasTexture(cv); tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+const mat = new THREE.ShaderMaterial({
+  uniforms: { tex: { value: tex }, time: { value: 0 }, rew: { value: 0 }, flick: { value: 0 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }`,
+  fragmentShader: `
+    uniform sampler2D tex; uniform float time, rew, flick; varying vec2 vUv;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
+    void main(){
+      vec2 uv = vUv;
+      float band = step(.93, fract(uv.y * 3.0 + time * 2.7));
+      uv.x += rew * (.006 * sin(uv.y * 90. + time * 50.) + .035 * band);
+      vec3 col = texture2D(tex, uv).rgb;
+      float r2 = texture2D(tex, uv + vec2(.005 * rew, 0.)).r;
+      col.r = mix(col.r, r2, rew);
+      float l = dot(col, vec3(.299, .587, .114));
+      col = mix(col, vec3(l * 1.07, l * .99, l * .86), .16);
+      float n = h(floor(vUv * vec2(1080., 1920.) / 1.5) + fract(time * 13.7) * 91.3);
+      col += (n - .5) * .075;
+      col += rew * .10 * band;
+      float dv = distance(vUv, vec2(.5, .52));
+      col *= mix(.62, 1., smoothstep(.85, .3, dv));
+      col *= 1. - .03 * flick;
+      gl_FragColor = vec4(col, 1.);
+    }`,
+});
+const scene = new THREE.Scene(); const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+
+window.renderAt = (t) => {
+  draw(t);
+  tex.needsUpdate = true;
+  mat.uniforms.time.value = t;
+  mat.uniforms.rew.value = seg(t, 13.3, 13.45) * (1 - seg(t, 14.2, 14.42));
+  mat.uniforms.flick.value = hash(Math.floor(t * 30));
+  renderer.render(scene, cam);
+};
+window.grab = () => renderer.domElement.toDataURL('image/jpeg', .9);
+
+(async () => {
+  await document.fonts.load('900 80px Inter'); await document.fonts.load('800 60px Inter');
+  await document.fonts.load('700 40px Inter'); await document.fonts.load('600 40px Inter'); await document.fonts.load('500 26px Inter');
+  const j = await (await fetch('words.json')).json();
+  WORDS = j.words.filter(w => w.type === 'word' && !w.text.startsWith('['));
+  const q = new URLSearchParams(location.search);
+  window.renderAt(parseFloat(q.get('t') || '0'));
+  window.READY = true;
+})();
+</script>
+</body></html>

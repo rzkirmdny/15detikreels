@@ -18,6 +18,8 @@ BG `#1b1815` · ink `#0d0c0b` · cream `#efe6d2` · aksen merah `#d8352a`
 ## Daftar video
 | No | Judul | Efek | Durasi |
 |---|---|---|---|
+| 01 | Bystander | bystander effect | 14,52 s |
+| 02 | Spotlight | spotlight effect (EN) | ±14,5 s |
 | 03 | Kalimat Kembar | illusory truth effect (buzzer) | 14,59 s |
 
-Video 01 (bystander effect) dan 02 (spotlight effect) belum dipindah ke sini; kodenya masih di dokumen Project `claude/loop-video-engine.md`.
+Mulai video baru: salin `engine/render.cjs` dan pakai `videos/03-kalimat-kembar/index.html` sebagai kerangka (utils, caption, shader, loop), ganti semua adegan.
