@@ -1,0 +1,445 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Kalimat Kembar</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body>
+<script type="module">
+import * as THREE from './node_modules/three/build/three.module.js';
+
+const W = 1080, H = 1920;
+let DUR = 14.59125;
+const CREAM = '#efe6d2', INK = '#0d0c0b', RED = '#d8352a', BG = '#1b1815', MUTE = '#2b2722';
+const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+const c = cv.getContext('2d');
+
+// ---------- utils ----------
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, k) => a + (b - a) * k;
+const eio = k => k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+const eout = k => 1 - Math.pow(1 - k, 3);
+const ein = k => k * k;
+const back = k => { if (k <= 0) return 0; if (k >= 1) return 1; const s = 1.9; k = k - 1; return k * k * ((s + 1) * k + s) + 1; };
+function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function hash(i) { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+function txt(s, x, y, font, col, align = 'center', stroke = 0) {
+  c.font = font; c.textAlign = align; c.textBaseline = 'middle';
+  if (stroke) { c.lineWidth = stroke; c.strokeStyle = INK; c.lineJoin = 'round'; c.strokeText(s, x, y); }
+  c.fillStyle = col; c.fillText(s, x, y);
+}
+
+// ---------- shared shapes ----------
+// paper-cut bust: head + shoulders, cream outline pass then ink pass
+function bust(x, y, s, hair = 0, alpha = 1) {
+  c.save(); c.globalAlpha = alpha; c.translate(x, y); c.scale(s, s);
+  for (const pass of [0, 1]) {
+    const ex = pass ? 0 : 7; c.fillStyle = pass ? INK : CREAM;
+    rr(c, -46 - ex, -10 - ex, 92 + ex * 2, 70 + ex * 2, 34 + ex); c.fill();
+    c.beginPath(); c.arc(0, -46, 30 + ex, 0, Math.PI * 2); c.fill();
+    if (hair === 1) { c.beginPath(); c.ellipse(0, -66, 34 + ex, 16 + ex, 0, Math.PI, 0); c.fill(); }
+    if (hair === 2) { c.beginPath(); c.arc(-22, -40, 16 + ex, 0, Math.PI * 2); c.arc(22, -40, 16 + ex, 0, Math.PI * 2); c.fill(); }
+    if (hair === 3) { rr(c, -26 - ex, -92 - ex, 52 + ex * 2, 24 + ex * 2, 10); c.fill(); }
+  }
+  c.restore();
+}
+function avatar(x, y, r, i) {
+  c.save(); c.translate(x, y);
+  c.fillStyle = '#3a342b'; c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2); c.fill();
+  c.save(); c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2); c.clip();
+  c.fillStyle = INK;
+  c.beginPath(); c.arc(0, -r * .18, r * .42, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(0, r * .78, r * .72, r * .5, 0, 0, Math.PI * 2); c.fill();
+  const h = Math.floor(hash(i) * 3);
+  if (h === 1) { c.beginPath(); c.ellipse(0, -r * .48, r * .46, r * .2, 0, Math.PI, 0); c.fill(); }
+  if (h === 2) { c.fillRect(-r * .5, -r * .3, r * .14, r * .6); c.fillRect(r * .36, -r * .3, r * .14, r * .6); }
+  c.restore();
+  c.strokeStyle = CREAM; c.lineWidth = 3; c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2); c.stroke();
+  c.restore();
+}
+const LINE1 = 'Udah, percaya aja.', LINE2 = 'Ini yang terbaik.';
+function slogan(x, y, s, hot = 0, alpha = 1) {
+  c.save(); c.globalAlpha = alpha; c.translate(x, y); c.scale(s, s);
+  c.fillStyle = CREAM; rr(c, -170, -52, 340, 104, 26); c.fill();
+  c.beginPath(); c.moveTo(-150, 40); c.lineTo(-176, 70); c.lineTo(-118, 46); c.closePath(); c.fill();
+  const col = hot > .5 ? RED : INK;
+  txt(LINE1, 0, -18, '800 30px Inter', col); txt(LINE2, 0, 20, '800 30px Inter', col);
+  c.restore();
+}
+
+// ---------- S1 / S6: the feed ----------
+const PH = { x: 250, y: 690, w: 580, h: 690 };
+const POST = 168, V = 300;
+function feedScroll(t) { return t >= 13.9 ? V * (t - DUR) : V * t; }
+function feed(t) {
+  // phone body
+  c.fillStyle = '#141210'; rr(c, PH.x - 26, PH.y - 60, PH.w + 52, PH.h + 120, 60); c.fill();
+  c.strokeStyle = CREAM; c.lineWidth = 6; rr(c, PH.x - 26, PH.y - 60, PH.w + 52, PH.h + 120, 60); c.stroke();
+  c.fillStyle = '#211d19'; rr(c, PH.x, PH.y, PH.w, PH.h, 18); c.fill();
+  c.fillStyle = '#3a342b'; rr(c, PH.x + PH.w / 2 - 60, PH.y - 34, 120, 14, 7); c.fill();
+  const sc = feedScroll(t);
+  const hot = (t > 1.7 && t < 2.45) ? 1 : 0;
+  c.save(); rr(c, PH.x, PH.y, PH.w, PH.h, 18); c.clip();
+  const first = Math.floor(sc / POST) - 2;
+  for (let k = first; k < first + 8; k++) {
+    const y = PH.y + 150 + k * POST - sc;
+    const id = ((k % 997) + 997) % 997;
+    avatar(PH.x + 58, y - 30, 32, id);
+    c.fillStyle = 'rgba(239,230,210,.75)';
+    txt('@warga_' + (1000 + Math.floor(hash(id + 5) * 8999)), PH.x + 104, y - 46, '700 24px Inter', 'rgba(239,230,210,.75)', 'left');
+    txt('1 mnt', PH.x + PH.w - 24, y - 46, '500 22px Inter', 'rgba(239,230,210,.4)', 'right');
+    c.save(); c.translate(PH.x + 104, y - 22);
+    c.fillStyle = hot ? '#f6d9d4' : CREAM; rr(c, 0, 0, 420, 92, 20); c.fill();
+    txt(LINE1, 20, 28, '800 29px Inter', hot ? RED : INK, 'left');
+    txt(LINE2, 20, 64, '800 29px Inter', hot ? RED : INK, 'left');
+    c.restore();
+    c.strokeStyle = 'rgba(239,230,210,.08)'; c.lineWidth = 2; c.beginPath(); c.moveTo(PH.x, y + 92); c.lineTo(PH.x + PH.w, y + 92); c.stroke();
+  }
+  c.restore();
+  // header bar with counter
+  c.fillStyle = 'rgba(20,18,16,.92)'; rr(c, PH.x, PH.y, PH.w, 64, [18, 18, 0, 0]); c.fill();
+  txt('Trending', PH.x + 26, PH.y + 32, '800 28px Inter', CREAM, 'left');
+  txt('100+ akun', PH.x + PH.w - 26, PH.y + 32, '800 28px Inter', RED, 'right');
+  // thumb
+  const th = Math.sin(t * 9) * 14;
+  c.save(); c.translate(PH.x + PH.w - 20, PH.y + PH.h - 40 + th); c.rotate(-.5);
+  c.fillStyle = CREAM; rr(c, -48, -78, 96, 260, 48); c.fill();
+  c.fillStyle = INK; rr(c, -40, -70, 80, 250, 40); c.fill();
+  c.restore();
+}
+function hook(alpha) {
+  if (alpha <= 0) return;
+  c.save(); c.globalAlpha = alpha;
+  c.fillStyle = 'rgba(13,12,11,.86)'; rr(c, 150, 372, 780, 240, 28); c.fill();
+  txt('100 akun.', 540, 444, '900 92px Inter', CREAM);
+  txt('1 kalimat.', 540, 548, '900 92px Inter', RED);
+  c.restore();
+}
+
+// ---------- S2: the puppet wall ----------
+const WALL = [];
+for (let r = 0; r < 4; r++) for (let q = 0; q < 7; q++) WALL.push({ x: 150 + q * 130 + (r % 2 ? 40 : -25), y: 850 + r * 150, r, q, i: WALL.length });
+function wall(t) {
+  const z = lerp(1.08, 1.0, eout(seg(t, 2.45, 3.0)));
+  c.save(); c.translate(540, 1050); c.scale(z, z); c.translate(-540, -1050);
+  c.fillStyle = '#1d1a17'; c.fillRect(-100, -100, 1280, 2120);
+  const g = c.createRadialGradient(540, 520, 30, 540, 520, 700);
+  g.addColorStop(0, 'rgba(216,53,42,.12)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(-100, -100, 1280, 2120);
+  const sync = eio(seg(t, 3.1, 3.8));
+  const sway = Math.sin(t * 5.2) * .09 * sync;
+  // control bar + hand
+  const bx = 540, by = 560;
+  const barK = eout(seg(t, 2.85, 3.15));
+  const ends = [];
+  c.save(); c.translate(bx, by - (1 - barK) * 260); c.rotate(sway);
+  c.globalAlpha = barK;
+  c.fillStyle = CREAM; rr(c, -330, -16, 660, 32, 16); c.fill(); rr(c, -16, -90, 32, 180, 16); c.fill();
+  c.fillStyle = INK; rr(c, -324, -10, 648, 20, 10); c.fill(); rr(c, -10, -84, 20, 168, 10); c.fill();
+  // hand gripping from above
+  c.fillStyle = CREAM; rr(c, -70, -200, 140, 150, 50); c.fill(); rr(c, -40, -330, 80, 160, 36); c.fill();
+  c.fillStyle = INK; rr(c, -62, -192, 124, 134, 44); c.fill(); rr(c, -32, -330, 64, 150, 30); c.fill();
+  c.strokeStyle = CREAM; c.lineWidth = 4; for (let f = 0; f < 3; f++) { c.beginPath(); c.moveTo(-40 + f * 40, -120); c.lineTo(-40 + f * 40, -64); c.stroke(); }
+  const m = c.getTransform();
+  for (let q = 0; q < 7; q++) { const p = m.transformPoint(new DOMPoint(-300 + q * 100, 0)); const iv = c.getTransform().inverse(); ends.push([p.x, p.y]); }
+  c.restore();
+  // heads
+  for (const h of WALL) {
+    const pop = back(seg(t, 2.45 + h.i * .012, 2.7 + h.i * .012));
+    if (pop <= 0) continue;
+    const own = Math.sin(t * (3 + hash(h.i) * 3) + h.i * 2.1) * 10;
+    const together = Math.sin(t * 5.2 + 1.2) * 12;
+    const dy = lerp(own, together, sync);
+    const hx = h.x + Math.sin(t * 5.2) * 10 * sync * (1 - h.r * .1);
+    const hy = h.y + dy;
+    // string
+    const sk = seg(t, 3.0 + h.i * .015, 3.35 + h.i * .015);
+    if (sk > 0) {
+      const [ex, ey] = ends[h.q];
+      const tx = hx, ty = hy - 80 * .9;
+      c.strokeStyle = RED; c.globalAlpha = .75; c.lineWidth = 2.5;
+      c.beginPath(); c.moveTo(ex, ey); c.lineTo(lerp(ex, tx, sk), lerp(ey, ty, sk)); c.stroke(); c.globalAlpha = 1;
+    }
+    bust(hx, hy, .82 * pop, Math.floor(hash(h.i + 9) * 4));
+    // mini slogan bubble flicker
+    const bk = seg(t, 2.6 + hash(h.i + 3) * .6, 2.75 + hash(h.i + 3) * .6) * (1 - seg(t, 4.1, 4.3));
+    if (bk > 0) { c.save(); c.globalAlpha = bk; c.fillStyle = CREAM; rr(c, hx + 18, hy - 120, 64, 30, 10); c.fill(); c.fillStyle = INK; rr(c, hx + 26, hy - 110, 48, 4, 2); c.fill(); rr(c, hx + 26, hy - 101, 34, 4, 2); c.fill(); c.restore(); }
+  }
+  c.restore();
+  // BUZZER stamp
+  const st = seg(t, 4.2, 4.38);
+  if (st > 0) {
+    c.save(); c.fillStyle = `rgba(8,7,6,${.45 * st})`; c.fillRect(0, 0, W, H);
+    const k = lerp(1.7, 1, eout(st));
+    c.translate(540, 1080); c.rotate(-.1); c.scale(k, k); c.globalAlpha = clamp(st * 2);
+    c.strokeStyle = RED; c.lineWidth = 16; rr(c, -330, -110, 660, 220, 18); c.stroke();
+    c.lineWidth = 5; rr(c, -306, -86, 612, 172, 10); c.stroke();
+    txt('BUZZER', 0, 6, '900 150px Inter', RED);
+    c.restore();
+  }
+}
+
+// ---------- S3: repetition into the head ----------
+const FLY = [5.25, 5.85, 6.45];
+function headProfile(x, y, s) {
+  c.save(); c.translate(x, y); c.scale(s, s);
+  for (const pass of [0, 1]) {
+    const ex = pass ? 0 : 10; c.fillStyle = pass ? INK : CREAM;
+    c.beginPath(); c.arc(0, 0, 210 + ex, 0, Math.PI * 2); c.fill();
+    // nose / face to the left
+    c.beginPath(); c.moveTo(-190 - ex, -20); c.lineTo(-262 - ex, 62); c.lineTo(-186 - ex, 96); c.closePath(); c.fill();
+    rr(c, -205 - ex, 90 - ex, 120 + ex * 2, 80 + ex * 2, 30); c.fill();
+    rr(c, -110 - ex, 120 - ex, 220 + ex * 2, 300 + ex * 2, 60); c.fill();
+    rr(c, -300 - ex, 330 - ex, 600 + ex * 2, 150 + ex * 2, 75); c.fill();
+  }
+  // ear
+  c.strokeStyle = CREAM; c.lineWidth = 6; c.beginPath(); c.ellipse(40, 30, 34, 52, 0, 0, Math.PI * 2); c.stroke();
+  c.restore();
+}
+function repeatScene(t) {
+  c.fillStyle = '#1c1916'; c.fillRect(0, 0, W, H);
+  const g = c.createRadialGradient(660, 1000, 40, 660, 1000, 640);
+  g.addColorStop(0, 'rgba(239,230,210,.08)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  const hx = 680, hy = 880;
+  let lvl = .18, flash = 0, absorbed = 0;
+  FLY.forEach((f, i) => { const k = seg(t, f, f + .42); if (k >= 1) { absorbed++; } flash = Math.max(flash, 1 - seg(t, f + .42, f + .75)) * (k >= 1 ? 1 : flash ? 1 : 0); });
+  lvl = [.18, .42, .66, .9][absorbed];
+  const shake = absorbed ? Math.sin(t * 60) * 4 * (1 - seg(t, FLY[absorbed - 1] + .42, FLY[absorbed - 1] + .6)) : 0;
+  headProfile(hx + shake, hy, .82);
+  // glowing brain area grows with each absorption
+  const lv = lerp([.18, .42, .66, .9][Math.max(0, absorbed - 1)], lvl, eout(seg(t, (FLY[absorbed - 1] || 0) + .42, (FLY[absorbed - 1] || 0) + .7)));
+  c.save(); c.globalAlpha = .9;
+  const bg = c.createRadialGradient(hx + 10, hy - 30, 10, hx + 10, hy - 30, 60 + 140 * lv);
+  bg.addColorStop(0, `rgba(216,53,42,${.25 + .5 * lv})`); bg.addColorStop(1, 'rgba(216,53,42,0)');
+  c.fillStyle = bg; c.beginPath(); c.arc(hx, hy, 168, 0, Math.PI * 2); c.fill(); c.restore();
+  // flying bubbles
+  FLY.forEach((f, i) => {
+    const k = seg(t, f - .05, f + .42);
+    if (k <= 0 || k >= 1) return;
+    const e = ein(k);
+    const x = lerp(-200, hx + 20, e), y = lerp(hy - 60 + i * 50, hy - 20, e);
+    slogan(x, y, lerp(1, .15, e * e), 0, 1 - seg(k, .85, 1));
+  });
+  // repetition counter
+  if (absorbed > 0) {
+    const a = back(seg(t, FLY[absorbed - 1] + .42, FLY[absorbed - 1] + .62));
+    c.save(); c.translate(hx + 190, hy - 160); c.scale(a, a); txt(absorbed + 'x', 0, 0, '900 96px Inter', RED, 'center', 14); c.restore();
+  }
+  // meter
+  const my = 1340;
+  txt('TERASA BENAR', 120, my - 50, '800 34px Inter', CREAM, 'left');
+  c.strokeStyle = CREAM; c.lineWidth = 5; rr(c, 120, my - 20, 840, 64, 16); c.stroke();
+  c.fillStyle = RED; rr(c, 130, my - 10, 820 * lv, 44, 10); c.fill();
+  txt(Math.round(lv * 100) + '%', 960, my - 50, '900 34px Inter', RED, 'right');
+}
+function panelStudy(t) {
+  const a = seg(t, 5.1, 5.3) * (1 - seg(t, 7.25, 7.38));
+  if (a <= 0) return;
+  c.save(); c.globalAlpha = a;
+  c.fillStyle = 'rgba(13,12,11,.88)'; rr(c, 90, 330, 900, 360, 28); c.fill();
+  c.fillStyle = RED; c.fillRect(90, 330, 14, 360);
+  txt('Kalimat yang diulang-ulang', 140, 400, '800 44px Inter', CREAM, 'left');
+  txt('terasa lebih benar, bahkan', 140, 458, '800 44px Inter', CREAM, 'left');
+  c.font = '800 44px Inter'; c.textAlign = 'left';
+  c.fillStyle = CREAM; c.fillText('saat kamu ', 140, 516);
+  const w1 = c.measureText('saat kamu ').width;
+  c.fillStyle = RED; c.fillText('sudah tahu faktanya.', 140 + w1, 516);
+  txt('Fazio, Brashier, Payne & Marsh (2015)', 140, 600, '600 28px Inter', 'rgba(239,230,210,.6)', 'left');
+  txt('Journal of Experimental Psychology: General', 140, 640, '500 24px Inter', 'rgba(239,230,210,.45)', 'left');
+  c.restore();
+}
+
+// ---------- S4: term card ----------
+function titleCard(t) {
+  c.fillStyle = '#181513'; c.fillRect(0, 0, W, H);
+  const g = c.createRadialGradient(540, 640, 40, 540, 640, 720);
+  g.addColorStop(0, 'rgba(216,53,42,.16)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+  // orbiting identical bubbles around a small head
+  const k0 = eout(seg(t, 7.3, 7.6));
+  headProfile(560, 1330, .55);
+  for (let i = 0; i < 5; i++) {
+    const a = t * 1.6 + i * Math.PI * 2 / 5;
+    slogan(560 + Math.cos(a) * 330, 1290 + Math.sin(a) * 120, .48 * k0, 0, k0 * (Math.sin(a) > 0 ? 1 : .55));
+  }
+  const ts = seg(t, 7.42, 7.62);
+  const sc = lerp(1.5, 1, eout(ts));
+  c.save(); c.translate(540, 620); c.scale(sc, sc); c.globalAlpha = clamp(ts * 3);
+  txt('ILLUSORY', 0, -150, '900 140px Inter', CREAM, 'center', 16);
+  txt('TRUTH', 0, -10, '900 140px Inter', CREAM, 'center', 16);
+  txt('EFFECT', 0, 130, '900 140px Inter', RED, 'center', 16);
+  c.restore();
+  const u = eout(seg(t, 8.05, 8.3));
+  c.fillStyle = RED; c.fillRect(540 - 270 * u, 830, 540 * u, 12);
+  c.globalAlpha = seg(t, 8.1, 8.3);
+  txt('efek kebenaran semu', 540, 900, '600 50px Inter', CREAM);
+  c.globalAlpha = 1;
+}
+
+// ---------- S5: checklist ----------
+const ITEMS = [
+  { t: 9.80, a: 'Kalimat kembar', b: 'teks sama persis dari banyak akun' },
+  { t: 10.77, a: 'Akun tanpa kehidupan', b: 'tanpa foto pribadi, cuma repost' },
+  { t: 12.21, a: 'Muncul pas isu panas', b: 'lama sepi, lalu serentak menyerbu' },
+];
+function icon(i, x, y, k) {
+  c.save(); c.translate(x, y); c.scale(k, k);
+  c.fillStyle = '#26221d'; rr(c, -90, -90, 180, 180, 28); c.fill();
+  c.strokeStyle = 'rgba(239,230,210,.25)'; c.lineWidth = 3; rr(c, -90, -90, 180, 180, 28); c.stroke();
+  if (i === 0) {
+    for (const dy of [-34, 30]) { c.fillStyle = CREAM; rr(c, -62, dy - 24, 124, 48, 14); c.fill(); c.fillStyle = INK; rr(c, -48, dy - 10, 90, 7, 3); c.fill(); rr(c, -48, dy + 3, 60, 7, 3); c.fill(); }
+    txt('=', 74, 0, '900 54px Inter', RED);
+  } else if (i === 1) {
+    c.fillStyle = '#3a342b'; c.beginPath(); c.arc(0, -22, 40, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = 'rgba(239,230,210,.6)'; c.lineWidth = 4; c.setLineDash([8, 7]); c.beginPath(); c.arc(0, -22, 40, 0, Math.PI * 2); c.stroke(); c.setLineDash([]);
+    txt('?', 0, -22, '900 44px Inter', 'rgba(239,230,210,.6)');
+    txt('0 foto', 0, 46, '800 26px Inter', CREAM);
+    txt('baru dibuat', 0, 74, '600 20px Inter', RED);
+  } else {
+    c.strokeStyle = CREAM; c.lineWidth = 6; c.lineJoin = 'round'; c.lineCap = 'round';
+    c.beginPath(); c.moveTo(-68, 50); c.lineTo(-30, 48); c.lineTo(0, 50); c.lineTo(14, 46); c.lineTo(30, -60); c.lineTo(44, 48); c.lineTo(68, 50); c.stroke();
+    // flame at the spike
+    c.fillStyle = RED; c.beginPath(); c.moveTo(30, -88); c.quadraticCurveTo(54, -62, 40, -48); c.quadraticCurveTo(30, -40, 20, -48); c.quadraticCurveTo(8, -64, 30, -88); c.fill();
+  }
+  c.restore();
+}
+function checklist(t) {
+  const out = seg(t, 13.95, 14.18);
+  const k = back(seg(t, 8.8, 9.15)) * (1 - eio(out));
+  if (k <= 0) return;
+  c.save(); c.translate(540, 840); c.scale(k, k); c.translate(-540, -840);
+  c.fillStyle = 'rgba(16,14,12,.97)'; rr(c, 70, 300, 940, 1090, 36); c.fill();
+  c.strokeStyle = CREAM; c.lineWidth = 5; rr(c, 70, 300, 940, 1090, 36); c.stroke();
+  txt('3 TANDA', 120, 392, '900 76px Inter', CREAM, 'left');
+  c.font = '900 76px Inter'; const w = c.measureText('3 TANDA ').width;
+  txt('BUZZER', 120 + w, 392, '900 76px Inter', RED, 'left');
+  c.fillStyle = RED; c.fillRect(120, 446, 260, 8);
+  ITEMS.forEach((it, i) => {
+    const y = 590 + i * 250;
+    const a = back(seg(t, it.t - .08, it.t + .18));
+    if (a <= 0) { c.fillStyle = 'rgba(239,230,210,.07)'; rr(c, 120, y - 90, 840, 180, 24); c.fill(); return; }
+    c.save(); c.globalAlpha = clamp(a * 1.5);
+    c.translate(lerp(60, 0, eout(clamp(a))), 0);
+    icon(i, 220, y, a);
+    txt(it.a, 340, y - 28, '900 50px Inter', CREAM, 'left');
+    txt(it.b, 340, y + 32, '600 31px Inter', 'rgba(239,230,210,.7)', 'left');
+    c.restore();
+    const ck = back(seg(t, it.t + .3, it.t + .48));
+    if (ck > 0) {
+      c.save(); c.translate(930, y - 60); c.scale(ck, ck);
+      c.fillStyle = RED; c.beginPath(); c.arc(0, 0, 34, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = CREAM; c.lineWidth = 8; c.lineCap = 'round'; c.lineJoin = 'round';
+      c.beginPath(); c.moveTo(-14, 1); c.lineTo(-4, 12); c.lineTo(16, -12); c.stroke(); c.restore();
+    }
+  });
+  const fa = seg(t, 12.75, 13.0);
+  if (fa > 0) {
+    c.globalAlpha = fa;
+    c.fillStyle = 'rgba(239,230,210,.08)'; rr(c, 120, 1288, 840, 70, 18); c.fill();
+    txt('Satu tanda belum tentu buzzer. Lihat kombinasinya.', 540, 1323, '700 29px Inter', CREAM);
+    c.globalAlpha = 1;
+  }
+  c.restore();
+}
+
+// ---------- captions ----------
+let WORDS = [];
+const GROUPS = [4, 3, 4, 2, 2, 3, 2, 3, 3, 2, 3, 5, 2];
+function captions(t) {
+  if (t >= 7.35 && t < 8.8) return;
+  const groups = []; let idx = 0; for (const n of GROUPS) { groups.push(WORDS.slice(idx, idx + n)); idx += n; }
+  let cur = 0; for (let g = 0; g < groups.length; g++) if (t >= groups[g][0].start - .05) cur = g;
+  const grp = groups[cur];
+  let actW = null; for (const w of WORDS) if (t >= w.start - .03) actW = w;
+  if (t < WORDS[0].start - .03) actW = null;
+  c.save();
+  c.font = '800 62px Inter'; c.textBaseline = 'middle'; c.textAlign = 'left';
+  const sp = c.measureText(' ').width;
+  const lines = [[]]; let lw = 0;
+  for (const w of grp) { const ww = c.measureText(w.text).width; if (lw + ww > 900 && lines[lines.length - 1].length) { lines.push([]); lw = 0; } lines[lines.length - 1].push({ w, ww }); lw += ww + sp; }
+  lines.forEach((ln, li) => {
+    const tw = ln.reduce((a, b) => a + b.ww, 0) + sp * (ln.length - 1);
+    let x = 540 - tw / 2; const y = 1480 + (li - (lines.length - 1) / 2) * 76;
+    for (const { w, ww } of ln) {
+      c.lineWidth = 14; c.strokeStyle = INK; c.lineJoin = 'round'; c.strokeText(w.text, x, y);
+      c.fillStyle = w === actW ? RED : CREAM; c.fillText(w.text, x, y);
+      x += ww + sp;
+    }
+  });
+  c.restore();
+}
+
+function draw(t) {
+  c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1;
+  c.fillStyle = BG; c.fillRect(0, 0, W, H);
+  if (t < 2.45 || t >= 13.95) {
+    // room behind the phone
+    const g = c.createRadialGradient(540, 1030, 60, 540, 1030, 760);
+    g.addColorStop(0, 'rgba(239,230,210,.10)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    feed(t);
+    if (t >= 13.95) checklist(t);
+  } else if (t < 5.05) wall(t);
+  else if (t < 7.35) { repeatScene(t); }
+  else if (t < 8.8) titleCard(t);
+  else {
+    // checklist backdrop: dim wall of busts
+    c.fillStyle = '#191613'; c.fillRect(0, 0, W, H);
+    for (const h of WALL) bust(h.x, h.y + 120 + Math.sin(t * 5.2 + 1.2) * 12, .9, Math.floor(hash(h.i + 9) * 4), .25);
+    checklist(t);
+  }
+  c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1;
+  panelStudy(t);
+  const hookA = t < 2.45 ? 1 - seg(t, 2.3, 2.45) : seg(t, 14.38, 14.58);
+  hook(hookA);
+  captions(t);
+}
+
+// ---------- three.js post ----------
+const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(W, H);
+document.body.appendChild(renderer.domElement);
+const tex = new THREE.CanvasTexture(cv); tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+const mat = new THREE.ShaderMaterial({
+  uniforms: { tex: { value: tex }, time: { value: 0 }, rew: { value: 0 }, flick: { value: 0 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }`,
+  fragmentShader: `
+    uniform sampler2D tex; uniform float time, rew, flick; varying vec2 vUv;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
+    void main(){
+      vec2 uv = vUv;
+      float band = step(.93, fract(uv.y * 3.0 + time * 2.7));
+      uv.x += rew * (.006 * sin(uv.y * 90. + time * 50.) + .035 * band);
+      vec3 col = texture2D(tex, uv).rgb;
+      float r2 = texture2D(tex, uv + vec2(.005 * rew, 0.)).r;
+      col.r = mix(col.r, r2, rew);
+      float l = dot(col, vec3(.299, .587, .114));
+      col = mix(col, vec3(l * 1.07, l * .99, l * .86), .16);
+      float n = h(floor(vUv * vec2(1080., 1920.) / 1.5) + fract(time * 13.7) * 91.3);
+      col += (n - .5) * .075;
+      col += rew * .10 * band;
+      float dv = distance(vUv, vec2(.5, .52));
+      col *= mix(.62, 1., smoothstep(.85, .3, dv));
+      col *= 1. - .03 * flick;
+      gl_FragColor = vec4(col, 1.);
+    }`,
+});
+const scene = new THREE.Scene(); const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+
+window.renderAt = (t) => {
+  draw(t);
+  tex.needsUpdate = true;
+  mat.uniforms.time.value = t;
+  mat.uniforms.rew.value = seg(t, 13.9, 14.05) * (1 - seg(t, 14.32, 14.55));
+  mat.uniforms.flick.value = hash(Math.floor(t * 30));
+  renderer.render(scene, cam);
+};
+window.grab = () => renderer.domElement.toDataURL('image/jpeg', .9);
+
+(async () => {
+  for (const f of ['900 80px Inter', '800 60px Inter', '700 40px Inter', '600 40px Inter', '500 26px Inter']) await document.fonts.load(f);
+  const j = await (await fetch('words.json')).json();
+  WORDS = j.words.filter(w => w.type === 'word' && !w.text.startsWith('['));
+  DUR = j.dur || DUR;
+  const q = new URLSearchParams(location.search);
+  window.renderAt(parseFloat(q.get('t') || '0'));
+  window.READY = true;
+})();
+</script>
+</body></html>

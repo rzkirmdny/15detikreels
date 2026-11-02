@@ -1,0 +1,11 @@
+node_modules/
+package-lock.json
+package.json
+stills/
+part*.mp4
+parts.txt
+*.mp4
+sfx.wav
+mix.wav
+render.cjs
+!engine/render.cjs

@@ -1,0 +1,150 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body>
+<script type="module">
+import * as THREE from './node_modules/three/build/three.module.js';
+const S = 1080, BW = 2560, BH = 1440;
+const CREAM = '#efe6d2', INK = '#0d0c0b', RED = '#d8352a';
+const cv = document.createElement('canvas'); cv.width = BW; cv.height = BH;
+const c = cv.getContext('2d');
+function rr(x, y, w, h, r) { c.beginPath(); c.roundRect(x, y, w, h, r); }
+
+function bg(glowX, glowY, red) {
+  c.fillStyle = '#1b1815'; c.fillRect(0, 0, S, S);
+  const g = c.createRadialGradient(glowX, glowY, 20, glowX, glowY, 620);
+  g.addColorStop(0, red ? 'rgba(216,53,42,.20)' : 'rgba(239,230,210,.13)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = g; c.fillRect(0, 0, S, S);
+}
+// A: side profile, glowing brain
+function profileHead(x, y, s, glow, tall = 0) {
+  c.save(); c.translate(x, y); c.scale(s, s);
+  for (const pass of [0, 1]) {
+    const ex = pass ? 0 : 12; c.fillStyle = pass ? INK : CREAM;
+    c.beginPath(); c.arc(0, 0, 210 + ex, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.moveTo(190 + ex, -20); c.lineTo(262 + ex, 62); c.lineTo(186 + ex, 96); c.closePath(); c.fill();
+    rr(85 - ex, 90 - ex, 120 + ex * 2, 80 + ex * 2, 30); c.fill();
+    rr(-110 - ex, 120 - ex, 220 + ex * 2, 300 + ex * 2, 60); c.fill();
+    rr(-330 - ex, 330 - ex, 660 + ex * 2, 400 + tall + ex * 2, 140); c.fill();
+  }
+  if (glow) {
+    const g = c.createRadialGradient(-10, -40, 10, -10, -40, 190);
+    g.addColorStop(0, 'rgba(216,53,42,.95)'); g.addColorStop(.45, 'rgba(216,53,42,.45)'); g.addColorStop(1, 'rgba(216,53,42,0)');
+    c.save(); c.beginPath(); c.arc(0, 0, 206, 0, Math.PI * 2); c.clip();
+    c.fillStyle = g; c.fillRect(-220, -220, 440, 440);
+    // brain folds
+    c.strokeStyle = 'rgba(239,230,210,.55)'; c.lineWidth = 7; c.lineCap = 'round';
+    c.beginPath();
+    c.moveTo(-110, -60); c.bezierCurveTo(-90, -130, -10, -140, 10, -90);
+    c.moveTo(10, -90); c.bezierCurveTo(30, -150, 110, -120, 100, -50);
+    c.moveTo(-100, 0); c.bezierCurveTo(-60, -40, -10, 10, 30, -20);
+    c.moveTo(30, -20); c.bezierCurveTo(70, -50, 110, 0, 80, 30);
+    c.moveTo(-60, 50); c.bezierCurveTo(-20, 20, 20, 70, 60, 50);
+    c.stroke();
+    c.restore();
+  }
+  c.restore();
+}
+// B: front bust under a spotlight
+function frontBust(x, y, s) {
+  c.save(); c.translate(x, y); c.scale(s, s);
+  for (const pass of [0, 1]) {
+    const ex = pass ? 0 : 12; c.fillStyle = pass ? INK : CREAM;
+    rr(-300 - ex, 120 - ex, 600 + ex * 2, 420 + ex * 2, 170 + ex); c.fill();
+    rr(-70 - ex, 40 - ex, 140 + ex * 2, 140 + ex * 2, 40); c.fill();
+    c.beginPath(); c.arc(0, -90, 165 + ex, 0, Math.PI * 2); c.fill();
+  }
+  // eyes: one cream, one red
+  c.fillStyle = CREAM; c.beginPath(); c.arc(-58, -80, 15, 0, Math.PI * 2); c.fill();
+  c.fillStyle = RED; c.beginPath(); c.arc(58, -80, 15, 0, Math.PI * 2); c.fill();
+  c.restore();
+}
+
+function drawA() {
+  bg(560, 470, true);
+  profileHead(490, 500, 1.05, true);
+}
+function drawB() {
+  bg(540, 520, false);
+  c.save(); c.globalAlpha = .12; c.fillStyle = CREAM;
+  c.beginPath(); c.moveTo(470, -20); c.lineTo(610, -20); c.lineTo(900, 1100); c.lineTo(180, 1100); c.closePath(); c.fill(); c.restore();
+  frontBust(540, 560, 1.15);
+  // red ring = the "camera" of attention
+  c.strokeStyle = RED; c.lineWidth = 16; c.beginPath(); c.arc(540, 450, 300, Math.PI * 1.08, Math.PI * 1.92); c.stroke();
+}
+function drawC() {
+  bg(540, 540, true);
+  // head profile with a red question-mark spark above
+  profileHead(500, 560, .95, false);
+  c.save(); c.translate(500, 520);
+  c.fillStyle = RED; c.font = '900 260px Inter'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText('?', 0, -20); c.restore();
+}
+
+
+function bust(x, y, s, alpha) {
+  c.save(); c.globalAlpha = alpha; c.translate(x, y); c.scale(s, s);
+  for (const pass of [0, 1]) { const ex = pass ? 0 : 7; c.fillStyle = pass ? INK : CREAM;
+    rr(-46 - ex, -10 - ex, 92 + ex * 2, 90 + ex * 2, 34 + ex); c.fill();
+    c.beginPath(); c.arc(0, -46, 30 + ex, 0, Math.PI * 2); c.fill(); }
+  c.restore();
+}
+function drawBanner() {
+  c.fillStyle = '#1b1815'; c.fillRect(0, 0, BW, BH);
+  let g = c.createRadialGradient(1280, 720, 40, 1280, 720, 1100);
+  g.addColorStop(0, 'rgba(216,53,42,.20)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(0, 0, BW, BH);
+  // soft spotlight from above onto the text
+  c.save(); c.globalAlpha = .07; c.fillStyle = CREAM;
+  c.beginPath(); c.moveTo(1180, -20); c.lineTo(1380, -20); c.lineTo(2000, 1440); c.lineTo(560, 1440); c.closePath(); c.fill(); c.restore();
+  // big brain-fold curves as a background motif
+  c.save(); c.strokeStyle = 'rgba(239,230,210,.07)'; c.lineWidth = 22; c.lineCap = 'round';
+  for (let k = 0; k < 9; k++) {
+    const y = 120 + k * 160;
+    c.beginPath(); c.moveTo(-100, y);
+    for (let x = -100; x <= 2700; x += 260) c.bezierCurveTo(x + 80, y - 90 - (k % 3) * 20, x + 180, y + 90, x + 260, y);
+    c.stroke();
+  }
+  c.restore();
+  // identical speech bubbles scattered at the edges (outside the safe area)
+  const bub = (x, y, s, a) => { c.save(); c.globalAlpha = a; c.translate(x, y); c.scale(s, s);
+    c.strokeStyle = CREAM; c.lineWidth = 6; rr(-120, -50, 240, 100, 26); c.stroke();
+    c.beginPath(); c.moveTo(-90, 50); c.lineTo(-115, 85); c.lineTo(-55, 50); c.stroke();
+    c.fillStyle = CREAM; rr(-85, -22, 170, 12, 6); c.fill(); rr(-85, 6, 110, 12, 6); c.fill(); c.restore(); };
+  [[220, 260, 1.1], [330, 1160, .9], [2330, 300, 1.0], [2240, 1150, 1.15], [150, 720, .7], [2440, 760, .75]].forEach(([x, y, s], i) => bub(x, y, s, .18));
+  bub(2240, 1150, 1.15, 0); c.save(); c.translate(2240, 1150); c.scale(1.15, 1.15); c.strokeStyle = RED; c.lineWidth = 7; rr(-120, -50, 240, 100, 26); c.stroke(); c.restore();
+  // text block, centered in the safe area (507..2053 x 508..931)
+  c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.lineJoin = 'round';
+  c.font = '900 168px Inter'; c.lineWidth = 18; c.strokeStyle = INK;
+  c.strokeText('@rzkirmdny', 1280, 712); c.fillStyle = CREAM; c.fillText('@rzkirmdny', 1280, 712);
+  c.fillStyle = RED; c.fillRect(1280 - 260, 752, 520, 14);
+  c.font = '700 62px Inter'; c.fillStyle = CREAM;
+  const l1 = 'Why do we do that? ', l2 = 'Psychology has the answer.';
+  const w1 = c.measureText(l1).width, w2 = c.measureText(l2).width, x0 = 1280 - (w1 + w2) / 2;
+  c.textAlign = 'left'; c.fillText(l1, x0, 870); c.fillStyle = RED; c.fillText(l2, x0 + w1, 870);
+}
+
+const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(BW, BH); document.body.appendChild(renderer.domElement);
+const tex = new THREE.CanvasTexture(cv); tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+const mat = new THREE.ShaderMaterial({
+  uniforms: { tex: { value: tex }, cr: { value: new THREE.Vector2(1, 1) } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }`,
+  fragmentShader: `uniform sampler2D tex; uniform vec2 cr; varying vec2 vUv;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
+    void main(){ vec3 col = texture2D(tex, vec2(vUv.x * cr.x, 1. - (1. - vUv.y) * cr.y)).rgb;
+      float l = dot(col, vec3(.299,.587,.114)); col = mix(col, vec3(l*1.07, l*.99, l*.86), .16);
+      col += (h(floor(vUv * vec2(2560., 1440.) / 1.5)) - .5) * .06;
+      col *= mix(.6, 1., smoothstep(.75, .25, distance(vUv, vec2(.5)) * 1.0));
+      gl_FragColor = vec4(col, 1.); }`,
+});
+const scene = new THREE.Scene(); scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+window.make = (v) => {
+  const ban = v === 'banner';
+  c.setTransform(1,0,0,1,0,0); c.clearRect(0,0,BW,BH);
+  if (ban) drawBanner(); else ({ A: drawA, B: drawB, C: drawC })[v]();
+  tex.needsUpdate = true;
+  if (ban) { renderer.setSize(BW, BH); mat.uniforms.cr.value.set(1, 1); }
+  else { renderer.setSize(S, S); mat.uniforms.cr.value.set(S / BW, S / BH); }
+  renderer.render(scene, cam); return renderer.domElement.toDataURL('image/png'); };
+(async () => { await document.fonts.load('900 200px Inter'); window.READY = true; })();
+</script></body></html>
